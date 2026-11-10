@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+.env
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Backend
+backend/dev.db
+backend/dev.db-journal
+backend/prisma/*.db
+backend/prisma/*.db-journal
+backend/prisma/*.db-wal
+backend/prisma/*.db-shm
+backend/uploads/
+
+# Frontend
+frontend/dist/
+
+# Credenciais e arquivos locais
+.env
+.env.*
+!.env.example
+backend/src/generated/sqlite-client/

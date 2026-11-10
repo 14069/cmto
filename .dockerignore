@@ -1,0 +1,14 @@
+.git
+.github
+.vscode
+.claude
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+backend/prisma/*.db
+backend/prisma/*.db-*
+backend/uploads
+**/*.log
+*.zip

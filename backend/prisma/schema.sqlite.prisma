@@ -1,0 +1,501 @@
+// CMTO VI - Sistema de Gestão Disciplinar
+// Cliente de leitura do banco SQLite original para migração de dados.
+//
+// Nota: SQLite não suporta enums nativos do Prisma.
+// Os enums foram convertidos em campos String com valores documentados abaixo.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/sqlite-client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("SQLITE_SOURCE_URL")
+}
+
+// ============================================
+// USUÁRIOS E PERMISSÕES
+// ============================================
+//
+// Role: ADMIN | COORD_DISCIPLINAR | COORD_PEDAGOGICO | MONITOR | PROFESSOR
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("MONITOR")
+  active       Boolean  @default(true)
+  avatarUrl    String?
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastLoginAt  DateTime?
+
+  classAccess  ClassUser[]
+
+  occurrencesCreated   Occurrence[] @relation("OccurrenceCreatedBy")
+  occurrencesApproved  Occurrence[] @relation("OccurrenceApprovedBy")
+  praisesCreated       Praise[]
+  tacsCreated          TAC[]
+  auditLogs            AuditLog[]
+  invitesSent          UserInvite[] @relation("InviteSentBy")
+  notifications        Notification[]
+  dailyControlsCreated DailyControl[]
+}
+
+model UserInvite {
+  id          String   @id @default(cuid())
+  email       String
+  role        String
+  token       String   @unique
+  used        Boolean  @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  sentBy      User     @relation("InviteSentBy", fields: [sentById], references: [id])
+  sentById    String
+}
+
+model ClassUser {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  classId   String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, classId])
+}
+
+// ============================================
+// TURMAS E ALUNOS
+// ============================================
+//
+// Shift: MATUTINO | VESPERTINO | INTEGRAL | NOTURNO
+// StudentStatus: ATIVO | INATIVO | TRANSFERIDO | FORMADO
+
+model Class {
+  id             String   @id @default(cuid())
+  name           String
+  schoolYear     Int
+  shift          String   @default("MATUTINO")
+  counselor      String?
+  active         Boolean  @default(true)
+
+  // Dados da escola/turma para exportação
+  school         String?  // Nome da escola
+  classification String?  // Classificação/Dependência (ex: Pública Federal)
+  region         String?  // Região administrativa
+  subRegion      String?  // Sub-região
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  students     Student[]
+  classUsers   ClassUser[]
+  praises      Praise[]
+  dailyControlClasses DailyControlClass[]
+}
+
+model Student {
+  id              String   @id @default(cuid())
+  registration    String   @unique
+  name            String
+  birthDate       DateTime?
+  photoUrl        String?
+
+  // Identificadores adicionais
+  cpf             String?
+  rnep            String?   // Registro militar
+  suCard          String?   // Cartão SU
+  bg              String?   // Boletim Geral
+  callNumber      Int?      // Nº Chamada na turma
+
+  // Dados pessoais
+  gender          String?   // M | F
+  socialName      String?
+  birthplace      String?   // Naturalidade
+
+  // Contato do aluno
+  phone           String?              // Celular do aluno
+  email           String?              // E-mail do aluno
+  institutionalEmail String?           // E-mail institucional
+
+  // Endereço
+  address         String?
+  neighborhood    String?   // Bairro
+  zipCode         String?   // CEP
+  city            String?
+  state           String?
+  country         String?   // País
+  zone            String?   // Zona de ensino
+  nationalLocation String?  // Localização Nacional
+
+  // Responsável
+  guardianName    String?
+  guardianPhone   String?
+  guardianEmail   String?
+  guardianRelation String?
+  guardianProfession String? // Profissão do responsável
+
+  // Necessidades e benefícios
+  specialNeeds    String?   // Necessidade especial
+  resources       String?   // Recursos de acessibilidade
+  restrictions    String?   // Restrições (alimentares, etc.)
+  scholarshipNumber String? // Nº Bolsa Família
+  receivesBenefit Boolean?  @default(false)
+
+  // Autorização e comunicação
+  authorized      String?   // Autorizado a ser consultado
+  priorityCommunication Boolean? @default(false)
+
+  // Situação escolar
+  status          String   @default("ATIVO")
+  schoolStatus    String?  // Situação escolar detalhada
+  statusDate      DateTime? // Data da situação
+  confirmationDate DateTime? // Data de confirmação de matrícula
+
+  currentScore    Float    @default(8.0)
+
+  class           Class    @relation(fields: [classId], references: [id])
+  classId         String
+
+  occurrences     Occurrence[]
+  praises         Praise[]
+  tacs            TAC[]
+  scoreHistory    ScoreHistory[]
+  academicGrades  AcademicGrade[]
+  honorOverrides  HonorOverride[]
+  dailyControlAbsences DailyControlAbsence[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([classId])
+  @@index([currentScore])
+}
+
+model ScoreHistory {
+  id          String   @id @default(cuid())
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId   String
+  previousScore Float
+  newScore    Float
+  delta       Float
+  reason      String
+  occurrenceId String?
+  praiseId    String?
+  createdAt   DateTime @default(now())
+
+  @@index([studentId, createdAt])
+}
+
+// ============================================
+// OCORRÊNCIAS DISCIPLINARES
+// ============================================
+//
+// OccurrenceType: ANOTACAO | TMD | SUSPENSAO
+// TMDLevel: LEVE | MEDIA | GRAVE | GRAVISSIMO
+// OccurrenceStatus: RASCUNHO | PENDENTE_DEFESA | PENDENTE_APROVACAO | APROVADO | REJEITADO | ARQUIVADO | AUTO_GERADO
+
+model OccurrenceCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  defaultType String?
+  defaultLevel String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  occurrences Occurrence[]
+}
+
+model Occurrence {
+  id            String   @id @default(cuid())
+  student       Student  @relation(fields: [studentId], references: [id])
+  studentId     String
+
+  type          String
+  tmdLevel      String?
+  tmdNumber     String?
+  suspensionDays Int?
+
+  category      OccurrenceCategory? @relation(fields: [categoryId], references: [id])
+  categoryId    String?
+
+  occurredAt    DateTime
+  location      String?
+  description   String
+
+  scoreImpact   Float    @default(0)
+  status        String   @default("RASCUNHO")
+
+  studentDefense String?
+  defenseDate   DateTime?
+  defensePresentedBy String?
+
+  requiresApproval Boolean @default(false)
+  approvedBy    User?    @relation("OccurrenceApprovedBy", fields: [approvedById], references: [id])
+  approvedById  String?
+  approvedAt    DateTime?
+  rejectionReason String?
+
+  autoGenerated Boolean  @default(false)
+  generatedFromIds String?
+
+  createdBy     User     @relation("OccurrenceCreatedBy", fields: [createdById], references: [id])
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  attachments   Attachment[]
+
+  @@index([studentId])
+  @@index([type])
+  @@index([status])
+  @@index([occurredAt])
+}
+
+// ============================================
+// ELOGIOS
+// ============================================
+//
+// PraiseType: COLETIVO | INDIVIDUAL | MENCAO_HONROSA
+
+model Praise {
+  id            String   @id @default(cuid())
+
+  student       Student? @relation(fields: [studentId], references: [id])
+  studentId     String?
+  class         Class?   @relation(fields: [classId], references: [id])
+  classId       String?
+
+  type          String
+  scoreImpact   Float
+
+  occurredAt    DateTime
+  reason        String
+  description   String
+
+  createdBy     User     @relation(fields: [createdById], references: [id])
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([classId])
+}
+
+// ============================================
+// TAC - TERMO DE AJUSTE DE CONDUTA
+// ============================================
+//
+// TACStatus: ATIVO | CUMPRIDO | DESCUMPRIDO | CANCELADO
+
+model TAC {
+  id            String   @id @default(cuid())
+  student       Student  @relation(fields: [studentId], references: [id])
+  studentId     String
+
+  // Identificação documental. Mantido opcional no banco para compatibilidade
+  // com TACs antigos, mas obrigatório para novas confecções no sistema.
+  tacNumber     String?
+  title         String
+
+  // "Dos Fatos" e observações/compromissos complementares.
+  description   String
+  goals         String
+
+  // Snapshot da situação disciplinar na data da confecção.
+  scoreAtCreation   Float?
+  conceptAtCreation String?
+  disciplinaryNature String?
+
+  // IDs dos TMDs que fundamentaram o TAC, separados por vírgula.
+  linkedTmdIds  String?
+
+  // Identificação para o bloco de assinaturas do documento.
+  coordinatorName String?
+  responsibleName String?
+  monitorName     String?
+
+  startDate     DateTime
+  endDate       DateTime
+  status        String   @default("ATIVO")
+
+  reviewNotes   String?
+  finalEvaluation String?
+  closedAt      DateTime?
+  closedBy      String?
+
+  documentUrl   String?
+
+  createdBy     User     @relation(fields: [createdById], references: [id])
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([status])
+  @@index([tacNumber])
+}
+
+
+// ============================================
+// CONTROLE DIÁRIO - EFETIVO E FALTOSOS
+// ============================================
+
+model DailyControl {
+  id                String   @id @default(cuid())
+  controlDate       DateTime @unique
+
+  // Campos manuais e opcionais do cabeçalho.
+  chiefGeneral      String?
+  chiefGeneralClass String?
+  deputyChief       String?
+  deputyChiefClass  String?
+  observations      String?
+
+  createdBy         User     @relation(fields: [createdById], references: [id])
+  createdById       String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  classes           DailyControlClass[]
+  absences          DailyControlAbsence[]
+
+  @@index([controlDate])
+}
+
+model DailyControlClass {
+  id             String       @id @default(cuid())
+  dailyControl   DailyControl @relation(fields: [dailyControlId], references: [id], onDelete: Cascade)
+  dailyControlId String
+
+  // Relação + snapshot para preservar o documento mesmo se a turma for alterada depois.
+  class          Class?       @relation(fields: [classId], references: [id], onDelete: SetNull)
+  classId        String?
+  className      String
+  effective      Int
+  present        Int
+  absent         Int
+
+  @@index([dailyControlId])
+  @@index([classId])
+}
+
+model DailyControlAbsence {
+  id             String       @id @default(cuid())
+  dailyControl   DailyControl @relation(fields: [dailyControlId], references: [id], onDelete: Cascade)
+  dailyControlId String
+
+  // Relação + snapshot para manter o histórico da chamada.
+  student        Student?     @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  studentId      String?
+  studentName    String
+  registration   String?
+  callNumber     Int?
+  className      String
+
+  @@index([dailyControlId])
+  @@index([studentId])
+}
+
+// ============================================
+// ANEXOS
+// ============================================
+
+model Attachment {
+  id            String   @id @default(cuid())
+  fileName      String
+  fileUrl       String
+  fileSize      Int
+  mimeType      String
+  occurrence    Occurrence? @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  occurrenceId  String?
+  createdAt     DateTime @default(now())
+}
+
+// ============================================
+// NOTIFICAÇÕES
+// ============================================
+//
+// NotificationType: ALERTA_ATENCAO | ALERTA_CRITICO | TMD_PENDENTE | TAC_VENCENDO | ANOTACAO_LIMITE | SISTEMA
+
+model Notification {
+  id            String   @id @default(cuid())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  type          String
+  title         String
+  message       String
+  link          String?
+  read          Boolean  @default(false)
+  readAt        DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([userId, read])
+}
+
+// ============================================
+// CONFIGURAÇÕES E AUDITORIA
+// ============================================
+
+model SystemConfig {
+  id                    String   @id @default(cuid())
+  key                   String   @unique
+  value                 String
+  description           String?
+  updatedAt             DateTime @updatedAt
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  user        User?    @relation(fields: [userId], references: [id])
+  userId      String?
+  action      String
+  entity      String
+  entityId    String?
+  oldData     String?
+  newData     String?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+// ============================================
+// CONDECORAÇÕES (Solenidade) — notas do boletim e ajustes manuais
+// ============================================
+model AcademicGrade {
+  id           String   @id @default(cuid())
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId    String
+  schoolYear   Int
+  bimester     Int                // 1 a 4
+  average      Float?             // média das disciplinas com nota lançada no bimestre
+  minGrade     Float?             // menor nota do bimestre
+  subjectCount Int      @default(0)
+  subjects     String?            // JSON { disciplina: nota }
+  importedAt   DateTime @default(now())
+
+  @@unique([studentId, schoolYear, bimester])
+  @@index([schoolYear])
+}
+
+model HonorOverride {
+  id           String   @id @default(cuid())
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId    String
+  schoolYear   Int
+  field        String             // DISC_MEDALHA | DISC_ALAMAR | PED_MEDALHA | PED_ALAMAR | DOURADO
+  value        Boolean
+  updatedById  String?
+  updatedAt    DateTime @updatedAt
+
+  @@unique([studentId, schoolYear, field])
+}
