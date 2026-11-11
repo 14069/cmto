@@ -105,18 +105,6 @@ app.use('/api/honors', honorRoutes);
 app.use('/api/daily-controls', dailyControlRoutes);
 
 // ============================================
-// FRONTEND ESTÁTICO (produção)
-// ============================================
-const frontendDist = join(__dirname, '../../frontend/dist');
-if (isProd && existsSync(frontendDist)) {
-  app.use(express.static(frontendDist));
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
-    res.sendFile(join(frontendDist, 'index.html'));
-  });
-}
-
-// ============================================
 // ERROR HANDLER
 // ============================================
 app.use(errorHandler);
